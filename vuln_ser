@@ -1,31 +1,65 @@
-import pickle
 import base64
-import os
+import json
 
-# --- LÓGICA DE LA APLICACIÓN (Vulnerable) ---
-def procesar_perfil_usuario(datos_binarios):
+# --- LÓGICA DE LA APLICACIÓN (Seguro) ---
+def _validar_perfil(perfil):
+    """Validación simple del perfil. Lanzará ValueError si es inválido."""
+    if not isinstance(perfil, dict):
+        raise ValueError("Perfil debe ser un objeto JSON")
+
+    required = {
+        "username": str,
+        "email": str,
+    }
+
+    optional = {
+        "age": int,
+    }
+
+    for key, typ in required.items():
+        if key not in perfil:
+            raise ValueError(f"Falta el campo requerido: {key}")
+        if not isinstance(perfil[key], typ):
+            raise ValueError(f"Tipo inválido para {key}: se esperaba {typ.__name__}")
+
+    for key, value in perfil.items():
+        if key in optional:
+            expected = optional[key]
+            if not isinstance(value, expected):
+                raise ValueError(f"Tipo inválido para {key}: se esperaba {expected.__name__}")
+        elif key not in required:
+            # Rechazamos propiedades adicionales para evitar datos inesperados
+            raise ValueError(f"Propiedad no permitida en perfil: {key}")
+
+
+def procesar_perfil_usuario(datos_base64):
+    """Procesa un perfil recibido como base64(json).
+
+    Esta función evita deserializadores inseguros como pickle y realiza validación
+    explícita del esquema del perfil.
+    """
     print("[Servidor] Recibiendo datos de perfil...")
     try:
-        # VULNERABILIDAD: Cargar datos directamente de una fuente externa
-        perfil = pickle.loads(base64.b64decode(datos_binarios))
-        print(f"[Servidor] Perfil procesado para: {perfil}")
+        datos = base64.b64decode(datos_base64)
+        perfil = json.loads(datos)
+        _validar_perfil(perfil)
+        print(f"[Servidor] Perfil procesado para: {perfil['username']}")
     except Exception as e:
         print(f"[Servidor] Error al procesar: {e}")
 
-# --- LÓGICA DEL ATACANTE ---
-class PayloadMalicioso:
-    def __reduce__(self):
-        # En Windows 11, 'calc.exe' es la forma clásica de demostrar RCE
-        comando = "calc.exe" 
-        return (os.system, (comando,))
 
-# 1. El atacante genera el objeto malicioso y lo convierte a base64
-ataque = PayloadMalicioso()
-datos_serializados = pickle.dumps(ataque)
-payload_final = base64.b64encode(datos_serializados).decode()
+# --- DEMOSTRACIÓN SEGURA ---
+if __name__ == "__main__":
+    ejemplo_perfil = {
+        "username": "victor",
+        "email": "victor@example.com",
+        "age": 30,
+    }
 
-# 2. Se envía el payload a la función vulnerable
-print("--- Simulando Ataque de Deserialización en Windows 11 ---")
-print(f"Payload generado: {payload_final}\n")
+    datos = json.dumps(ejemplo_perfil).encode()
+    payload_final = base64.b64encode(datos).decode()
 
-procesar_perfil_usuario(payload_final)
+    print("--- Simulación de envío seguro de perfil (JSON + validación) ---")
+    print(f"Payload generado (base64): {payload_final}\n")
+
+    procesar_perfil_usuario(payload_final)
