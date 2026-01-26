@@ -1,31 +1,69 @@
-import pickle
+import json
 import base64
+import hmac
+import hashlib
 import os
 
-# --- LÓGICA DE LA APLICACIÓN (Vulnerable) ---
-def procesar_perfil_usuario(datos_binarios):
-    print("[Servidor] Recibiendo datos de perfil...")
+# Clave secreta para firmar/verificar payloads. En producción, colocar en una variable de entorno segura.
+SECRET_KEY = os.environ.get("PAYLOAD_SECRET", "cambiar_esta_clave").encode()
+
+# --- LÓGICA DE LA APLICACIÓN (Segura) ---
+def procesar_perfil_usuario(datos_entrada):
+    """
+    Espera un string con el formato "<hex_signature>:<payload_base64>".
+    - Verifica la firma HMAC-SHA256 antes de procesar.
+    - Decodifica el payload (JSON) y lo carga con json.loads en lugar de pickle.
+    """
+    print("[Servidor] Recibiendo datos de perfil (modo seguro)...")
     try:
-        # VULNERABILIDAD: Cargar datos directamente de una fuente externa
-        perfil = pickle.loads(base64.b64decode(datos_binarios))
-        print(f"[Servidor] Perfil procesado para: {perfil}")
+        if ":" not in datos_entrada:
+            raise ValueError("Formato de entrada inválido. Se esperaba 'sig:base64'.")
+
+        sig_hex, b64_payload = datos_entrada.split(":", 1)
+        payload_bytes = base64.b64decode(b64_payload)
+
+        # Verificar firma HMAC
+        expected_sig = hmac.new(SECRET_KEY, payload_bytes, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected_sig, sig_hex):
+            raise ValueError("Firma HMAC inválida. Rechazando datos no confiables.")
+
+        # Cargar JSON (solo tipos de datos primitivos) en lugar de pickle
+        perfil = json.loads(payload_bytes.decode("utf-8"))
+
+        # Validación básica: asegurar que perfil sea un dict y contener tipos seguros
+        if not isinstance(perfil, dict):
+            raise ValueError("Perfil inválido: se esperaba un objeto JSON (dict).")
+
+        def validar_valores(obj):
+            if isinstance(obj, (str, int, float, bool)) or obj is None:
+                return True
+            if isinstance(obj, list):
+                return all(validar_valores(x) for x in obj)
+            if isinstance(obj, dict):
+                return all(isinstance(k, str) and validar_valores(v) for k, v in obj.items())
+            return False
+
+        if not validar_valores(perfil):
+            raise ValueError("Perfil contiene tipos de datos no permitidos.")
+
+        print(f"[Servidor] Perfil procesado (seguro) para: {perfil}")
     except Exception as e:
         print(f"[Servidor] Error al procesar: {e}")
 
-# --- LÓGICA DEL ATACANTE ---
-class PayloadMalicioso:
-    def __reduce__(self):
-        # En Windows 11, 'calc.exe' es la forma clásica de demostrar RCE
-        comando = "calc.exe" 
-        return (os.system, (comando,))
 
-# 1. El atacante genera el objeto malicioso y lo convierte a base64
-ataque = PayloadMalicioso()
-datos_serializados = pickle.dumps(ataque)
-payload_final = base64.b64encode(datos_serializados).decode()
+# --- EJEMPLO: Generar y enviar un payload firmado y seguro ---
+if __name__ == "__main__":
+    # Datos del usuario en formato seguro (JSON)
+    datos = {"usuario": "victima", "edad": 30, "roles": ["user"]}
+    datos_json = json.dumps(datos).encode("utf-8")
 
-# 2. Se envía el payload a la función vulnerable
-print("--- Simulando Ataque de Deserialización en Windows 11 ---")
-print(f"Payload generado: {payload_final}\n")
+    # Firmar el payload con HMAC-SHA256
+    sig = hmac.new(SECRET_KEY, datos_json, hashlib.sha256).hexdigest()
+    payload_b64 = base64.b64encode(datos_json).decode()
 
-procesar_perfil_usuario(payload_final)
+    payload_final = f"{sig}:{payload_b64}"
+
+    print("--- Simulando envío seguro de perfil ---")
+    print(f"Payload generado: {payload_final}\n")
+
+    procesar_perfil_usuario(payload_final)
